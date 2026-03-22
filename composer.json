@@ -34,7 +34,8 @@
         "laravel/framework": ">=10.17.0 <10.25.0"
     },
     "suggest": {
-        "ext-pcntl": "Required for the spinner to be animated."
+        "ext-pcntl": "Required for the spinner to be animated.",
+        "ext-shmop": "Required to render a task and a prompt simultaneously."
     },
     "config": {
         "audit": {

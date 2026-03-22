@@ -83,12 +83,20 @@ class Task extends Prompt
     protected ?int $partialStartIndex = null;
 
     /**
+     * The current frame height plus the current prompt's frame height if one was rendered in the callback.
+     */
+    protected int $frameHeightWithPrompt;
+
+    /**
+     * The previous prompt's frame height if one was rendered in the callback.
+     */
+    protected ?int $prevPromptHeight = null;
+
+    /**
      * Create a new Task instance.
      */
-    public function __construct(
-        public string $label = '',
-        public int $limit = 10,
-    ) {
+    public function __construct(public string $label = '', public int $limit = 10)
+    {
         $this->identifier = uniqid();
     }
 
@@ -110,13 +118,13 @@ class Task extends Prompt
 
         $this->capturePreviousNewLines();
 
-        if (! function_exists('pcntl_fork')) {
+        if (!function_exists('pcntl_fork')) {
             return $this->renderStatically($callback);
         }
 
         $originalAsync = pcntl_async_signals(true);
 
-        pcntl_signal(SIGINT, fn () => exit());
+        pcntl_signal(SIGINT, fn() => exit());
 
         try {
             $this->hideCursor();
@@ -135,10 +143,11 @@ class Task extends Prompt
                 $childSocket = $sockets[0];
                 stream_set_blocking($childSocket, false);
 
-                while (true) { // @phpstan-ignore-line
+                // @phpstan-ignore-line-next-line
+                while (true) {
                     $this->receiveMessages($childSocket);
 
-                    if (! $this->finished) {
+                    if (!$this->finished) {
                         $this->render();
                         $this->count++;
                     }
@@ -154,7 +163,7 @@ class Task extends Prompt
 
                 if ($this->socket !== null) {
                     // Send a reset message to the parent process to reset the terminal.
-                    fwrite($this->socket, $this->identifier.'_'.'reset:'.($originalAsync ? 1 : 0).PHP_EOL);
+                    fwrite($this->socket, $this->identifier . '_' . 'reset:' . ($originalAsync ? 1 : 0) . PHP_EOL);
                     usleep($this->interval * 2000);
                 }
 
@@ -178,13 +187,13 @@ class Task extends Prompt
 
         while (($data = fgets($socket)) !== false) {
             // Buffer incomplete lines from non-blocking reads.
-            if (! str_ends_with($data, PHP_EOL)) {
+            if (!str_ends_with($data, PHP_EOL)) {
                 $this->buffer .= $data;
 
                 continue;
             }
 
-            $line = rtrim($this->buffer.$data, PHP_EOL);
+            $line = rtrim($this->buffer . $data, PHP_EOL);
             $this->buffer = '';
 
             if ($line === '') {
@@ -192,7 +201,13 @@ class Task extends Prompt
             }
 
             // Check for typed messages: {id}_{type}:{content}
-            if (preg_match('/^'.$prefix.'_(success|warning|error|label|reset|partial|commitpartial):(.*)/', $line, $matches)) {
+            if (
+                preg_match(
+                    '/^' . $prefix . '_(success|warning|error|label|reset|partial|commitpartial):(.*)/',
+                    $line,
+                    $matches,
+                )
+            ) {
                 $type = $matches[1];
                 $content = $matches[2];
 
@@ -355,7 +370,7 @@ class Task extends Prompt
     protected function eraseRenderedLines(): void
     {
         $lines = explode(PHP_EOL, $this->prevFrame);
-        $this->moveCursor(-999, -count($lines) + 1);
+        $this->moveCursor(-999, -$this->frameHeightWithPrompt + 1);
         $this->eraseDown();
     }
 
@@ -364,10 +379,74 @@ class Task extends Prompt
      */
     public function __destruct()
     {
-        if (! empty($this->pid)) {
+        if (!empty($this->pid)) {
             posix_kill($this->pid, SIGHUP);
         }
 
         parent::__destruct();
+    }
+
+    protected function render(): void
+    {
+        $this->terminal()->initDimensions();
+
+        $frame = $this->renderTheme();
+
+        if ($frame === $this->prevFrame) {
+            return;
+        }
+
+        if ($this->state === 'initial') {
+            static::output()->write($frame);
+
+            $this->state = 'active';
+            $this->prevFrame = $frame;
+            $this->frameHeightWithPrompt = count(explode(PHP_EOL, $frame)) + (TaskActivePrompt::lineCount() ?? 0);
+
+            return;
+        }
+
+        $terminalHeight = $this->terminal()->lines();
+        $previousFrameHeight = count(explode(PHP_EOL, $this->prevFrame));
+        $renderableLines = array_slice(explode(PHP_EOL, $frame), abs(min(0, $terminalHeight - $previousFrameHeight)));
+        $promptLineCount = TaskActivePrompt::lineCount();
+        $promptWasInactivated = $promptLineCount === null && $this->prevPromptHeight !== null;
+
+        $this->frameHeightWithPrompt = count($renderableLines) + $promptLineCount;
+
+        if ($promptLineCount !== null) {
+            $this->moveCursorUp($previousFrameHeight + $promptLineCount - 2);
+        } elseif ($this->prevPromptHeight !== null) {
+            $this->moveCursorUp($previousFrameHeight + $this->prevPromptHeight - 2);
+        } else {
+            $this->moveCursorUp(min($terminalHeight, $previousFrameHeight) - 1);
+        }
+
+        /**
+         * The newlines which create a gap between the task and the prompt.
+         *
+         * @see \Laravel\Prompts\Themes\Default\Renderer::__toString()
+         * @see \Laravel\Prompts\Output\ConsoleOutput::doWrite()
+         */
+        $gapNewlines = max(2 - (strlen($frame) - strlen(rtrim($frame, PHP_EOL))), 0);
+
+        /*
+         * The previous frame is always erased and the prompt is erased only if it was inactivated in this render.
+         * Then, if the prompt was inactivated in this render, we'll also include the gap newlines in the erased lines
+         * because there's no longer a prompt to create a gap for.
+         */
+        $this->eraseLines(
+            $previousFrameHeight - 1 +
+                ($promptWasInactivated ? $this->prevPromptHeight : 0) -
+                ($promptWasInactivated ? 0 : $gapNewlines),
+        );
+        $this->output()->write(implode(PHP_EOL, $renderableLines));
+
+        if ($promptLineCount !== null) {
+            $this->moveCursor(x: 0, y: $promptLineCount - 1);
+        }
+
+        $this->prevFrame = $frame;
+        $this->prevPromptHeight = $promptLineCount;
     }
 }

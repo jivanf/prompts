@@ -9,13 +9,22 @@ trait Erase
      */
     public function eraseLines(int $count): void
     {
+        if ($count < 1) {
+            return;
+        }
+
         $clear = '';
+
         for ($i = 0; $i < $count; $i++) {
-            $clear .= "\e[2K".($i < $count - 1 ? "\e[{$count}A" : '');
+            $clear .= "\e[2K";
+
+            if ($i < $count - 1) {
+                $clear .= "\e[1B";
+            }
         }
 
         if ($count) {
-            $clear .= "\e[G";
+            $clear .= "\e[" . $count - 1 . "A\e[G";
         }
 
         static::writeDirectly($clear);

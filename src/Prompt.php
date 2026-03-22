@@ -110,7 +110,7 @@ abstract class Prompt
 
             static::$interactive ??= stream_isatty(STDIN);
 
-            if (! static::$interactive) {
+            if (!static::$interactive) {
                 return $this->default();
             }
 
@@ -143,7 +143,7 @@ abstract class Prompt
                     }
 
                     if ($key === Key::CTRL_U && self::$revertUsing) {
-                        throw new FormRevertedException;
+                        throw new FormRevertedException();
                     }
 
                     return Result::from($this->transformedValue());
@@ -182,6 +182,8 @@ abstract class Prompt
                 return $result->value;
             }
         }
+
+        return null;
     }
 
     /**
@@ -223,7 +225,7 @@ abstract class Prompt
      */
     protected static function output(): OutputInterface
     {
-        return self::$output ??= new ConsoleOutput;
+        return self::$output ??= new ConsoleOutput();
     }
 
     /**
@@ -243,7 +245,7 @@ abstract class Prompt
      */
     public static function terminal(): Terminal
     {
-        return static::$terminal ??= new Terminal;
+        return static::$terminal ??= new Terminal();
     }
 
     /**
@@ -293,12 +295,16 @@ abstract class Prompt
             $this->state = 'active';
             $this->prevFrame = $frame;
 
+            TaskActivePrompt::update(count(explode(PHP_EOL, $frame)));
+
             return;
         }
 
         $terminalHeight = $this->terminal()->lines();
         $previousFrameHeight = count(explode(PHP_EOL, $this->prevFrame));
         $renderableLines = array_slice(explode(PHP_EOL, $frame), abs(min(0, $terminalHeight - $previousFrameHeight)));
+
+        TaskActivePrompt::update(count($renderableLines));
 
         $this->moveCursorToColumn(1);
         $this->moveCursorUp(min($terminalHeight, $previousFrameHeight) - 1);
@@ -336,7 +342,7 @@ abstract class Prompt
         }
 
         if ($key === Key::CTRL_U) {
-            if (! self::$revertUsing) {
+            if (!self::$revertUsing) {
                 $this->state = 'error';
                 $this->error = 'This cannot be reverted.';
 
@@ -398,7 +404,7 @@ abstract class Prompt
             return;
         }
 
-        if (! isset($this->validate) && ! isset(static::$validateUsing)) {
+        if (!isset($this->validate) && !isset(static::$validateUsing)) {
             return;
         }
 
@@ -408,7 +414,7 @@ abstract class Prompt
             default => throw new RuntimeException('The validation logic is missing.'),
         };
 
-        if (! is_string($error) && ! is_null($error)) {
+        if (!is_string($error) && !is_null($error)) {
             throw new RuntimeException('The validator must return a string or null.');
         }
 
@@ -432,7 +438,9 @@ abstract class Prompt
     private function checkEnvironment(): void
     {
         if (PHP_OS_FAMILY === 'Windows') {
-            throw new RuntimeException('Prompts is not currently supported on Windows. Please use WSL or configure a fallback.');
+            throw new RuntimeException(
+                'Prompts is not currently supported on Windows. Please use WSL or configure a fallback.',
+            );
         }
     }
 
@@ -444,5 +452,7 @@ abstract class Prompt
         $this->restoreCursor();
 
         static::terminal()->restoreTty();
+
+        TaskActivePrompt::remove();
     }
 }
