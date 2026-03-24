@@ -203,13 +203,20 @@ class Task extends Prompt
             // Check for typed messages: {id}_{type}:{content}
             if (
                 preg_match(
-                    '/^' . $prefix . '_(success|warning|error|label|reset|partial|commitpartial):(.*)/',
+                    '/^' . $prefix . '_(success|warning|error|label|reset|partial|commitpartial|clear):(.*)/',
                     $line,
                     $matches,
                 )
             ) {
                 $type = $matches[1];
                 $content = $matches[2];
+
+                if ($type === 'clear') {
+                    $this->logs = [];
+                    $this->partialStartIndex = null;
+
+                    continue;
+                }
 
                 if ($type === 'reset') {
                     $this->resetTerminal((bool) $content);

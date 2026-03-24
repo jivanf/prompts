@@ -246,3 +246,29 @@ it('updates the label through the socket protocol', function () {
 
     expect($task->label)->toBe('Updated Label');
 });
+
+it('clears log lines but preserves stable messages through the socket protocol', function () {
+    Prompt::fake();
+
+    $task = new Task(label: 'Test', limit: 10);
+
+    $receiveMessages = new ReflectionMethod($task, 'receiveMessages');
+
+    $sockets = stream_socket_pair(STREAM_PF_UNIX, STREAM_SOCK_STREAM, STREAM_IPPROTO_IP);
+
+    $id = $task->identifier;
+
+    fwrite($sockets[1], "log line 1\n");
+    fwrite($sockets[1], "{$id}_success:Success message\n");
+    fwrite($sockets[1], "log line 2\n");
+    fwrite($sockets[1], "{$id}_clear:\n");
+    fclose($sockets[1]);
+
+    stream_set_blocking($sockets[0], false);
+    $receiveMessages->invoke($task, $sockets[0]);
+    fclose($sockets[0]);
+
+    expect($task->logs)->toBeEmpty();
+    expect($task->stableMessages)->toHaveCount(1);
+    expect($task->stableMessages[0])->toBe(['type' => 'success', 'message' => 'Success message']);
+});
