@@ -46,6 +46,14 @@ class Logger
     }
 
     /**
+     * Clear all the lines from the process log.
+     */
+    public function clear(): void
+    {
+        $this->write('', 'clear');
+    }
+
+    /**
      * Log a success message to the process log.
      */
     public function success(string $message): void
