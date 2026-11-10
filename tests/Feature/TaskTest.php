@@ -1,8 +1,10 @@
 <?php
 
+use Laravel\Prompts\Output\BufferedConsoleOutput;
 use Laravel\Prompts\Prompt;
 use Laravel\Prompts\Support\Logger;
 use Laravel\Prompts\Task;
+use Laravel\Prompts\Themes\Default\TaskRenderer;
 
 use function Laravel\Prompts\task;
 
@@ -23,6 +25,62 @@ it('renders a task while executing a callback and then returns the value', funct
     Prompt::assertOutputContains('Running...');
 });
 
+it('renders a task statically when output is not a terminal even if it is decorated', function () {
+    Prompt::fake();
+    Prompt::terminal()->shouldReceive('isOutputTty')->andReturn(false);
+
+    $output = new BufferedConsoleOutput;
+    $output->setDecorated(true);
+    Prompt::setOutput($output);
+
+    $task = new Task(label: 'Running...');
+
+    $result = $task->run(fn (Logger $logger) => 'done');
+
+    expect($result)->toBe('done');
+    expect($task->static)->toBeTrue();
+    expect($output->content())->toContain('Running...');
+});
+
+it('prints a completion line after the task finishes in static mode with keepSummary', function () {
+    Prompt::fake();
+
+    $task = new Task(label: 'My Task', keepSummary: true);
+
+    $renderStatically = new ReflectionMethod($task, 'renderStatically');
+    $renderStatically->setAccessible(true);
+    $renderStatically->invoke($task, fn (Logger $logger) => null);
+
+    Prompt::assertStrippedOutputContains('✔ My Task');
+});
+
+it('does not print a completion line without keepSummary in static mode', function () {
+    Prompt::fake();
+
+    $task = new Task(label: 'My Task');
+
+    $renderStatically = new ReflectionMethod($task, 'renderStatically');
+    $renderStatically->setAccessible(true);
+    $renderStatically->invoke($task, fn (Logger $logger) => null);
+
+    Prompt::assertStrippedOutputDoesntContain('✔ My Task');
+});
+
+it('does not print a completion line when the callback throws in static mode', function () {
+    Prompt::fake();
+
+    $task = new Task(label: 'My Task', keepSummary: true);
+
+    $renderStatically = new ReflectionMethod($task, 'renderStatically');
+    $renderStatically->setAccessible(true);
+
+    expect(fn () => $renderStatically->invoke($task, function (Logger $logger) {
+        throw new RuntimeException('boom');
+    }))->toThrow(RuntimeException::class, 'boom');
+
+    Prompt::assertStrippedOutputDoesntContain('✔ My Task');
+});
+
 it('returns null when the callback does not return a value', function () {
     Prompt::fake();
 
@@ -34,6 +92,25 @@ it('returns null when the callback does not return a value', function () {
     );
 
     expect($result)->toBeNull();
+});
+
+it('restores the previous signal handler', function () {
+    Prompt::fake();
+
+    $originalSignalHandler = pcntl_signal_get_handler(SIGINT);
+    $signalHandler = fn () => null;
+    pcntl_signal(SIGINT, $signalHandler);
+
+    try {
+        task(
+            label: 'Running...',
+            callback: fn (Logger $logger) => null,
+        );
+
+        expect(pcntl_signal_get_handler(SIGINT))->toBe($signalHandler);
+    } finally {
+        pcntl_signal(SIGINT, $originalSignalHandler);
+    }
 });
 
 it('receives log lines into the ring buffer', function () {
@@ -245,6 +322,96 @@ it('updates the label through the socket protocol', function () {
     fclose($sockets[0]);
 
     expect($task->label)->toBe('Updated Label');
+});
+
+it('does not keep the summary by default', function () {
+    $task = new Task(label: 'Running', limit: 10);
+
+    expect($task->keepSummary)->toBeFalse();
+});
+
+it('renders the label and stable messages when finished with retain enabled', function () {
+    Prompt::fake();
+
+    $task = new Task(label: 'Running', limit: 10, keepSummary: true);
+    $task->finished = true;
+    $task->stableMessages[] = ['type' => 'success', 'message' => 'Step one done'];
+    $task->stableMessages[] = ['type' => 'error', 'message' => 'Step two failed'];
+
+    $renderer = new TaskRenderer($task);
+    $output = (string) $renderer($task);
+
+    expect($output)->toContain('Running');
+    expect($output)->toContain('Step one done');
+    expect($output)->toContain('Step two failed');
+    expect($output)->not->toContain('─');
+    expect($output)->toEndWith(PHP_EOL.PHP_EOL);
+});
+
+it('renders nothing special when finished with no stable messages', function () {
+    Prompt::fake();
+
+    $task = new Task(label: 'Running', limit: 10, keepSummary: true);
+    $task->finished = true;
+
+    $renderer = new TaskRenderer($task);
+    $output = (string) $renderer($task);
+
+    expect($output)->toContain('Running');
+});
+
+it('shrinks the stable-message budget when a sub-label appears mid-task', function () {
+    Prompt::fake();
+
+    $task = new Task(label: 'Running', limit: 10);
+    $task->maxStableMessages = 3;
+
+    $task->stableMessages = [
+        ['type' => 'success', 'message' => 'one'],
+        ['type' => 'success', 'message' => 'two'],
+        ['type' => 'success', 'message' => 'three'],
+    ];
+
+    $receiveMessages = new ReflectionMethod($task, 'receiveMessages');
+    $sockets = stream_socket_pair(STREAM_PF_UNIX, STREAM_SOCK_STREAM, STREAM_IPPROTO_IP);
+
+    $id = $task->identifier;
+    fwrite($sockets[1], "{$id}_sublabel:Now doing a thing\n");
+    fclose($sockets[1]);
+
+    stream_set_blocking($sockets[0], false);
+    $receiveMessages->invoke($task, $sockets[0]);
+    fclose($sockets[0]);
+
+    expect($task->subLabel)->toBe('Now doing a thing');
+    expect($task->maxStableMessages)->toBeLessThan(3);
+    expect(count($task->stableMessages))->toBeLessThanOrEqual($task->maxStableMessages);
+
+    $previousBudget = $task->maxStableMessages;
+
+    $sockets = stream_socket_pair(STREAM_PF_UNIX, STREAM_SOCK_STREAM, STREAM_IPPROTO_IP);
+    fwrite($sockets[1], "{$id}_sublabel:\n");
+    fclose($sockets[1]);
+    stream_set_blocking($sockets[0], false);
+    $receiveMessages->invoke($task, $sockets[0]);
+    fclose($sockets[0]);
+
+    expect($task->subLabel)->toBe('');
+    expect($task->maxStableMessages)->toBe($previousBudget + 1);
+});
+
+it('does not take the retain branch when keepSummary is disabled', function () {
+    Prompt::fake();
+
+    $task = new Task(label: 'Running', limit: 10, keepSummary: false);
+    $task->finished = true;
+    $task->stableMessages[] = ['type' => 'success', 'message' => 'Step one done'];
+
+    $renderer = new TaskRenderer($task);
+    $output = (string) $renderer($task);
+
+    expect($output)->toContain('Running');
+    expect($output)->toContain('Step one done');
 });
 
 it('clears log lines but preserves stable messages through the socket protocol', function () {

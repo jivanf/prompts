@@ -455,4 +455,16 @@ abstract class Prompt
 
         TaskActivePrompt::remove();
     }
+
+    /**
+     * Flush the global state of Prompts.
+     */
+    public static function flushState(): void
+    {
+        static::$cancelUsing = null;
+        static::$validateUsing = null;
+        static::$revertUsing = null;
+        static::$shouldFallback = false;
+        static::$fallbacks = [];
+    }
 }

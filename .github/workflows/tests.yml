@@ -15,12 +15,17 @@ permissions:
 jobs:
   tests:
     runs-on: ubuntu-22.04
+    continue-on-error: ${{ matrix.experimental || false }}
 
     strategy:
       fail-fast: true
       matrix:
         php: [8.1, 8.2, 8.3, 8.4, 8.5]
         laravel: [10, 11, 12, 13]
+        include:
+          - php: 8.6
+            laravel: 13
+            experimental: true
         exclude:
           - php: 8.1
             laravel: 11
@@ -37,14 +42,16 @@ jobs:
           - php: 8.5
             laravel: 11
 
-    name: PHP ${{ matrix.php }} - With Collections ${{ matrix.laravel }}
+    name: PHP ${{ matrix.php }} - With Collections ${{ matrix.laravel }} ${{ matrix.experimental == true && '(experimental)' || '' }}
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Setup PHP
-        uses: shivammathur/setup-php@v2
+        uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # v2
         with:
           php-version: ${{ matrix.php }}
           extensions: dom, curl, libxml, mbstring, zip
@@ -53,11 +60,11 @@ jobs:
           coverage: none
 
       - name: Install dependencies
-        uses: nick-fields/retry@v3
+        uses: nick-fields/retry@ad984534de44a9489a53aefd81eb77f87c70dc60 # v4
         with:
           timeout_minutes: 5
           max_attempts: 5
-          command: composer update --with="illuminate/collections:^${{ matrix.laravel }}" --prefer-stable --prefer-dist --no-interaction --no-progress
+          command: composer update --with="illuminate/collections:^${{ matrix.laravel }}" --prefer-stable --prefer-dist --no-interaction --no-progress ${{ matrix.experimental == true && '--ignore-platform-reqs' || '' }}
 
       - name: Execute tests
         run: vendor/bin/pest
@@ -74,10 +81,12 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Setup PHP
-        uses: shivammathur/setup-php@v2
+        uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # v2
         with:
           php-version: ${{ matrix.php }}
           extensions: dom, curl, libxml, mbstring, zip
@@ -86,14 +95,14 @@ jobs:
           coverage: none
 
       - name: Remove collections
-        uses: nick-fields/retry@v3
+        uses: nick-fields/retry@ad984534de44a9489a53aefd81eb77f87c70dc60 # v4
         with:
           timeout_minutes: 5
           max_attempts: 5
           command: composer remove illuminate/collections --dev --no-interaction --no-update
 
       - name: Install dependencies
-        uses: nick-fields/retry@v3
+        uses: nick-fields/retry@ad984534de44a9489a53aefd81eb77f87c70dc60 # v4
         with:
           timeout_minutes: 5
           max_attempts: 5
