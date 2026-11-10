@@ -52,6 +52,6 @@ class TaskActivePrompt
             return static::$shmop;
         }
 
-        return static::$shmop = @shmop_open(0x70726d74, 'c', 0644, 2);
+        return static::$shmop = @shmop_open(0x70726D74, 'c', 0644, 2);
     }
 }

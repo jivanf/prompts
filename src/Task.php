@@ -3,8 +3,10 @@
 namespace Laravel\Prompts;
 
 use Closure;
+use Laravel\Prompts\Output\ConsoleOutput;
 use Laravel\Prompts\Support\Logger;
 use Laravel\Prompts\Themes\Default\Concerns\InteractsWithStrings;
+use Laravel\Prompts\Themes\Default\Renderer;
 use RuntimeException;
 
 class Task extends Prompt
@@ -128,7 +130,7 @@ class Task extends Prompt
         /** @var callable|int $originalSignalHandler */
         $originalSignalHandler = pcntl_signal_get_handler(SIGINT);
 
-        pcntl_signal(SIGINT, fn() => exit());
+        pcntl_signal(SIGINT, fn () => exit());
 
         try {
             $this->hideCursor();
@@ -154,7 +156,7 @@ class Task extends Prompt
                 while (true) {
                     $this->receiveMessages($childSocket);
 
-                    if (!$this->finished) {
+                    if (! $this->finished) {
                         $this->render();
                         $this->count++;
                     }
@@ -170,7 +172,7 @@ class Task extends Prompt
 
                 if ($this->socket !== null) {
                     // Send a reset message to the parent process to reset the terminal.
-                    fwrite($this->socket, $this->identifier . '_' . 'reset:' . ($originalAsync ? 1 : 0) . PHP_EOL);
+                    fwrite($this->socket, $this->identifier.'_'.'reset:'.($originalAsync ? 1 : 0).PHP_EOL);
                     usleep($this->interval * 2000);
                 }
 
@@ -197,13 +199,13 @@ class Task extends Prompt
 
         while (($data = fgets($socket)) !== false) {
             // Buffer incomplete lines from non-blocking reads.
-            if (!str_ends_with($data, PHP_EOL)) {
+            if (! str_ends_with($data, PHP_EOL)) {
                 $this->buffer .= $data;
 
                 continue;
             }
 
-            $line = rtrim($this->buffer . $data, PHP_EOL);
+            $line = rtrim($this->buffer.$data, PHP_EOL);
             $this->buffer = '';
 
             if ($line === '') {
@@ -428,7 +430,7 @@ class Task extends Prompt
      */
     public function __destruct()
     {
-        if (!empty($this->pid)) {
+        if (! empty($this->pid)) {
             posix_kill($this->pid, SIGHUP);
         }
 
@@ -474,8 +476,8 @@ class Task extends Prompt
         /**
          * The newlines which create a gap between the task and the prompt.
          *
-         * @see \Laravel\Prompts\Themes\Default\Renderer::__toString()
-         * @see \Laravel\Prompts\Output\ConsoleOutput::doWrite()
+         * @see Renderer::__toString()
+         * @see ConsoleOutput::doWrite()
          */
         $gapNewlines = max(2 - (strlen($frame) - strlen(rtrim($frame, PHP_EOL))), 0);
 

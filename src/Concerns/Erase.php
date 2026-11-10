@@ -24,7 +24,7 @@ trait Erase
         }
 
         if ($count) {
-            $clear .= "\e[" . $count - 1 . "A\e[G";
+            $clear .= "\e[".$count - 1 ."A\e[G";
         }
 
         static::writeDirectly($clear);
